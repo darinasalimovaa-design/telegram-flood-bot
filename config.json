@@ -1,17 +1,17 @@
 {
-  "main_admin_id": 0,
-  "admin_group_id": 0,
+  "main_admin_id": 1986087627,
+  "admin_group_id": -1003740654454,
   "chats": {
     "chat1": {
-      "title": "Chat 1",
-      "info_url": "https://example.com/chat1-info",
-      "chat_id": 0,
+      "title": "𝐒𝐂𝐀𝐑𝐀'𝐒 𝐂𝐎𝐙𝐘 𝐇𝐀𝐓 1",
+      "info_url": "https://t.me/SCH_kik",
+      "chat_id": -1003188439372,
       "member_limit": 60
     },
     "chat2": {
-      "title": "Chat 2",
-      "info_url": "https://example.com/chat2-info",
-      "chat_id": 0,
+      "title": "𝐒𝐂𝐀𝐑𝐀'𝐒 𝐂𝐎𝐙𝐘 𝐇𝐀𝐓 2",
+      "info_url": "https://t.me/SCH_kik2",
+      "chat_id": -1003795017989,
       "member_limit": 60
     }
   }
