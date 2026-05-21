@@ -1,10 +1,10 @@
+import os
 import asyncio
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from html import escape
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -16,15 +16,19 @@ from storage import load_config, load_data, next_id, save_data
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change-me-secret")
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("flood_bot")
 
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
+router = Router()
+dp.include_router(router)
+
 USER_STATE = {}
 
 
-# ---------- helpers ----------
 def cfg():
     return load_config()
 
@@ -48,7 +52,7 @@ def reply_menu(is_admin_user: bool = False):
     kb.button(text="Отменить")
     kb.button(text="Инфо")
     kb.adjust(2, 2)
-    return kb.as_markup(resize_keyboard=True)
+    return kb.as_markup()
 
 
 def cancel_inline():
@@ -121,16 +125,6 @@ async def create_one_time_link(chat_id: int, title: str, user_id: int) -> str:
         name=f"{title}-{user_id}-{int(datetime.now().timestamp())}",
     )
     return invite.invite_link
-
-
-async def find_application(app_id: int):
-    data = load_data()
-    return data, next((a for a in data["applications"] if a["id"] == app_id), None)
-
-
-async def find_reservation(res_id: int):
-    data = load_data()
-    return data, next((r for r in data["reservations"] if r["id"] == res_id), None)
 
 
 async def send_application_card(target_chat_id: int, app: dict, with_controls: bool = True):
@@ -226,8 +220,7 @@ def reservations_text(res):
     return "\n".join([f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res])
 
 
-# ---------- public flow ----------
-@dp.message(CommandStart())
+@router.message(CommandStart())
 async def start(message: Message):
     USER_STATE.pop(message.from_user.id, None)
     await message.answer(
@@ -238,12 +231,12 @@ async def start(message: Message):
     )
 
 
-@dp.message(Command("menu"))
+@router.message(Command("menu"))
 async def menu(message: Message):
     await message.answer("📋 <b>Меню открыто</b>", reply_markup=reply_menu(is_admin(message.from_user.id)))
 
 
-@dp.message(F.text == "Инфо")
+@router.message(F.text == "Инфо")
 async def info(message: Message):
     c = cfg()
     text = (
@@ -255,12 +248,12 @@ async def info(message: Message):
     await message.answer(text, reply_markup=reply_menu(False))
 
 
-@dp.message(F.text == "Подать заявку")
+@router.message(F.text == "Подать заявку")
 async def apply(message: Message):
     await message.answer("Выбери чат, в который хочешь попасть:", reply_markup=chat_choice_kb())
 
 
-@dp.callback_query(F.data.startswith("choose_chat:"))
+@router.callback_query(F.data.startswith("choose_chat:"))
 async def choose_chat(call: CallbackQuery):
     chat_key = call.data.split(":", 1)[1]
     c = cfg()
@@ -287,20 +280,20 @@ async def choose_chat(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data == "cancel_action")
+@router.callback_query(F.data == "cancel_action")
 async def cancel_action(call: CallbackQuery):
     USER_STATE.pop(call.from_user.id, None)
     await call.message.answer("❎ <b>Действие отменено</b>", reply_markup=reply_menu(is_admin(call.from_user.id)))
     await call.answer()
 
 
-@dp.message(F.text == "Отменить")
+@router.message(F.text == "Отменить")
 async def cancel_user(message: Message):
     USER_STATE.pop(message.from_user.id, None)
     await message.answer("❎ <b>Текущее действие отменено</b>", reply_markup=reply_menu(is_admin(message.from_user.id)))
 
 
-@dp.message(F.text == "Мои заявки")
+@router.message(F.text == "Мои заявки")
 async def my_apps(message: Message):
     data = load_data()
     apps = [a for a in data["applications"] if a["user_id"] == message.from_user.id]
@@ -317,7 +310,7 @@ async def my_apps(message: Message):
     await message.answer("\n".join(parts), reply_markup=reply_menu(False))
 
 
-@dp.message(F.text)
+@router.message(F.text)
 async def text_router(message: Message):
     state = USER_STATE.get(message.from_user.id)
     if not state:
@@ -361,8 +354,7 @@ async def text_router(message: Message):
         return
 
 
-# ---------- admin actions ----------
-@dp.callback_query(F.data.startswith("approve_app:"))
+@router.callback_query(F.data.startswith("approve_app:"))
 async def approve_app(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     data = load_data()
@@ -399,7 +391,7 @@ async def approve_app(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data.startswith("reject_app:"))
+@router.callback_query(F.data.startswith("reject_app:"))
 async def reject_app(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     data = load_data()
@@ -415,7 +407,7 @@ async def reject_app(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data.startswith("reject_reason:"))
+@router.callback_query(F.data.startswith("reject_reason:"))
 async def reject_reason(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     USER_STATE[call.from_user.id] = {"step": "reason", "app_id": app_id}
@@ -423,7 +415,7 @@ async def reject_reason(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data.startswith("confirm_join:"))
+@router.callback_query(F.data.startswith("confirm_join:"))
 async def confirm_join(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     data = load_data()
@@ -449,8 +441,7 @@ async def confirm_join(call: CallbackQuery):
     await call.answer()
 
 
-# ---------- admin panel ----------
-@dp.message(F.text == "Заявки")
+@router.message(F.text == "Заявки")
 async def admin_list_apps(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -473,7 +464,7 @@ async def admin_list_apps(message: Message):
         )
 
 
-@dp.message(F.text == "Брони")
+@router.message(F.text == "Брони")
 async def admin_list_res(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -492,7 +483,7 @@ async def admin_list_res(message: Message):
     )
 
 
-@dp.message(F.text == "Статус чатов")
+@router.message(F.text == "Статус чатов")
 async def admin_chat_status(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -509,15 +500,14 @@ async def admin_chat_status(message: Message):
     await message.answer("\n".join(lines), reply_markup=reply_menu(True))
 
 
-@dp.message(F.text == "Логи")
+@router.message(F.text == "Логи")
 async def admin_logs(message: Message):
     if not is_admin(message.from_user.id):
         return
     await message.answer("📝 Логи пишутся в <code>bot.log</code> на сервере.", reply_markup=reply_menu(True))
 
 
-# ---------- admin commands in group and private ----------
-@dp.message(Command("applications"))
+@router.message(Command("applications"))
 async def cmd_applications(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -534,7 +524,7 @@ async def cmd_applications(message: Message):
         await message.answer("Ожидающие заявки:\n\n" + applications_text(pending[-30:]), reply_markup=admin_list_kb(pending[-12:], "app", "Заявка"))
 
 
-@dp.message(Command("reservations"))
+@router.message(Command("reservations"))
 async def cmd_reservations(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -547,14 +537,14 @@ async def cmd_reservations(message: Message):
     await message.answer("Список броней:\n\n" + reservations_text(res[-30:]), reply_markup=admin_list_kb(res[-12:], "res", "Бронь"))
 
 
-@dp.message(Command("status"))
+@router.message(Command("status"))
 async def cmd_status(message: Message):
     if not is_admin(message.from_user.id):
         return
     await admin_chat_status(message)
 
 
-@dp.message(Command("pending"))
+@router.message(Command("pending"))
 async def cmd_pending(message: Message):
     if not is_admin(message.from_user.id):
         return
@@ -566,7 +556,7 @@ async def cmd_pending(message: Message):
     await message.answer("Ожидающие заявки:\n\n" + applications_text(pending[-30:]), reply_markup=admin_list_kb(pending[-12:], "app", "Заявка"))
 
 
-@dp.callback_query(F.data.startswith("app:"))
+@router.callback_query(F.data.startswith("app:"))
 async def app_quick_view(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     data = load_data()
@@ -589,7 +579,7 @@ async def app_quick_view(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data.startswith("res:"))
+@router.callback_query(F.data.startswith("res:"))
 async def res_quick_view(call: CallbackQuery):
     res_id = int(call.data.split(":", 1)[1])
     data = load_data()
@@ -608,11 +598,13 @@ async def res_quick_view(call: CallbackQuery):
     await call.answer()
 
 
-async def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN is not set")
-    await dp.start_polling(bot)
+def get_bot():
+    return bot
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def get_dispatcher():
+    return dp
+
+
+def get_webhook_secret():
+    return WEBHOOK_SECRET
