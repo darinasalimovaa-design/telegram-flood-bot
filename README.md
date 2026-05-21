@@ -48,6 +48,7 @@ Python bot for managing admission to two Telegram chats with file-based storage,
 
    from app import app as application
    ```
+   Replace `telegram-flood-bot` with your actual project directory name on PythonAnywhere.
 5. Reload web app in PythonAnywhere dashboard.
 6. Run webhook registration once:
    ```bash

@@ -18,9 +18,8 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
-WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "").strip() or "/webhook"
-if not WEBHOOK_PATH.startswith("/"):
-    WEBHOOK_PATH = f"/{WEBHOOK_PATH}"
+_webhook_path_raw = os.getenv("WEBHOOK_PATH", "").strip() or "/webhook"
+WEBHOOK_PATH = _webhook_path_raw if _webhook_path_raw.startswith("/") else f"/{_webhook_path_raw}"
 WEBHOOK_URL = f"{WEBHOOK_BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if WEBHOOK_BASE_URL else ""
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("flood_bot")

@@ -1,6 +1,7 @@
 import atexit
 import asyncio
-from concurrent.futures import TimeoutError
+import os
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from threading import Lock
 from threading import Thread
 
@@ -13,6 +14,8 @@ app = Flask(__name__)
 _startup_lock = Lock()
 _started = False
 _event_loop = asyncio.new_event_loop()
+ASYNC_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_PROCESS_TIMEOUT", "20"))
+SHUTDOWN_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_LOOP_SHUTDOWN_TIMEOUT", "1"))
 
 
 def _loop_runner():
@@ -27,8 +30,8 @@ _loop_thread.start()
 def _run_async(coro):
     future = asyncio.run_coroutine_threadsafe(coro, _event_loop)
     try:
-        return future.result(timeout=20)
-    except TimeoutError:
+        return future.result(timeout=ASYNC_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
         future.cancel()
         raise
 
@@ -36,7 +39,7 @@ def _run_async(coro):
 def _shutdown_loop():
     if _event_loop.is_running():
         _event_loop.call_soon_threadsafe(_event_loop.stop)
-    _loop_thread.join(timeout=1)
+    _loop_thread.join(timeout=SHUTDOWN_TIMEOUT_SECONDS)
 
 
 atexit.register(_shutdown_loop)
@@ -78,6 +81,6 @@ def telegram_webhook():
     try:
         ensure_started()
         _run_async(process_update(payload))
-    except TimeoutError:
+    except FutureTimeoutError:
         abort(504, description="Webhook update processing timeout")
     return Response("ok", status=200)
