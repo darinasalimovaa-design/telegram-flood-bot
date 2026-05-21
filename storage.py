@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -24,19 +25,37 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def load_config() -> Dict[str, Any]:
-    return read_json(CONFIG_FILE, {
-        "main_admin_id": 0,
-        "admin_group_id": 0,
-        "chats": {
-            "chat1": {"title": "Chat 1", "info_url": "", "chat_id": 0, "member_limit": 60},
-            "chat2": {"title": "Chat 2", "info_url": "", "chat_id": 0, "member_limit": 60},
+    return read_json(
+        CONFIG_FILE,
+        {
+            "main_admin_id": 0,
+            "admin_group_id": 0,
+            "chats": {
+                "chat1": {"title": "Chat 1", "info_url": "", "chat_id": 0, "member_limit": 60},
+                "chat2": {"title": "Chat 2", "info_url": "", "chat_id": 0, "member_limit": 60},
+            },
         },
-    })
+    )
 
 
 def load_data() -> Dict[str, Any]:
-    return read_json(APP_FILE, {"applications": [], "reservations": [], "counters": {"application_id": 0, "reservation_id": 0}})
+    return read_json(
+        APP_FILE,
+        {
+            "applications": [],
+            "reservations": [],
+            "invite_links": [],
+            "pending_joins": [],
+            "counters": {"application_id": 0, "reservation_id": 0, "link_id": 0},
+        },
+    )
 
 
 def save_data(data: Dict[str, Any]) -> None:
     write_json(APP_FILE, data)
+
+
+def next_id(data: Dict[str, Any], key: str) -> int:
+    data["counters"][key] += 1
+    save_data(data)
+    return data["counters"][key]
