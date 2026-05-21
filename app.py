@@ -1,4 +1,6 @@
+import atexit
 import asyncio
+from concurrent.futures import TimeoutError
 from threading import Lock
 from threading import Thread
 
@@ -23,7 +25,21 @@ _loop_thread.start()
 
 
 def _run_async(coro):
-    return asyncio.run_coroutine_threadsafe(coro, _event_loop).result()
+    future = asyncio.run_coroutine_threadsafe(coro, _event_loop)
+    try:
+        return future.result(timeout=20)
+    except TimeoutError:
+        future.cancel()
+        raise
+
+
+def _shutdown_loop():
+    if _event_loop.is_running():
+        _event_loop.call_soon_threadsafe(_event_loop.stop)
+    _loop_thread.join(timeout=1)
+
+
+atexit.register(_shutdown_loop)
 
 
 def ensure_started():
@@ -52,10 +68,16 @@ def telegram_webhook():
         if header_secret != WEBHOOK_SECRET:
             abort(403)
 
-    payload = request.get_json(silent=True)
-    if not payload:
-        abort(400, description="Invalid JSON payload")
+    if not request.is_json:
+        abort(400, description="Request must be application/json")
 
-    ensure_started()
-    _run_async(process_update(payload))
+    payload = request.get_json(silent=True)
+    if payload is None:
+        abort(400, description="Malformed JSON payload")
+
+    try:
+        ensure_started()
+        _run_async(process_update(payload))
+    except TimeoutError:
+        abort(504, description="Webhook update processing timeout")
     return Response("ok", status=200)
