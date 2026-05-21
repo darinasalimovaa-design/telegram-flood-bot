@@ -1,5 +1,6 @@
 import asyncio
 from threading import Lock
+from threading import Thread
 
 from flask import Flask, Response, abort, request
 
@@ -9,6 +10,20 @@ app = Flask(__name__)
 
 _startup_lock = Lock()
 _started = False
+_event_loop = asyncio.new_event_loop()
+
+
+def _loop_runner():
+    asyncio.set_event_loop(_event_loop)
+    _event_loop.run_forever()
+
+
+_loop_thread = Thread(target=_loop_runner, daemon=True)
+_loop_thread.start()
+
+
+def _run_async(coro):
+    return asyncio.run_coroutine_threadsafe(coro, _event_loop).result()
 
 
 def ensure_started():
@@ -18,7 +33,7 @@ def ensure_started():
     with _startup_lock:
         if _started:
             return
-        asyncio.run(configure_webhook())
+        _run_async(configure_webhook())
         _started = True
 
 
@@ -42,5 +57,5 @@ def telegram_webhook():
         abort(400, description="Invalid JSON payload")
 
     ensure_started()
-    asyncio.run(process_update(payload))
+    _run_async(process_update(payload))
     return Response("ok", status=200)

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -19,7 +18,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
-WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "").strip() or (f"/webhook/{BOT_TOKEN}" if BOT_TOKEN else "/webhook")
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "").strip() or "/webhook"
 if not WEBHOOK_PATH.startswith("/"):
     WEBHOOK_PATH = f"/{WEBHOOK_PATH}"
 WEBHOOK_URL = f"{WEBHOOK_BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if WEBHOOK_BASE_URL else ""
@@ -636,11 +635,3 @@ async def configure_webhook():
 
 async def shutdown():
     await bot.session.close()
-
-
-async def main():
-    await configure_webhook()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

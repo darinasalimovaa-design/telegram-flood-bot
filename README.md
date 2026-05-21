@@ -24,7 +24,7 @@ Python bot for managing admission to two Telegram chats with file-based storage,
    - `BOT_TOKEN`
    - `WEBHOOK_BASE_URL` (for PythonAnywhere domain, e.g. `https://yourname.pythonanywhere.com`)
    - optional `WEBHOOK_SECRET` (recommended)
-   - optional `WEBHOOK_PATH` (default: `/webhook/<BOT_TOKEN>`)
+   - optional `WEBHOOK_PATH` (default: `/webhook`, recommended to change to a random path)
 3. Update `config.json` with:
    - `main_admin_id`
    - `admin_group_id`
