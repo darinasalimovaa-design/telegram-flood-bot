@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -16,10 +17,16 @@ from storage import load_config, load_data, next_id, save_data
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip()
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "").strip() or (f"/webhook/{BOT_TOKEN}" if BOT_TOKEN else "/webhook")
+if not WEBHOOK_PATH.startswith("/"):
+    WEBHOOK_PATH = f"/{WEBHOOK_PATH}"
+WEBHOOK_URL = f"{WEBHOOK_BASE_URL.rstrip('/')}{WEBHOOK_PATH}" if WEBHOOK_BASE_URL else ""
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("flood_bot")
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 USER_STATE = {}
 
@@ -608,10 +615,31 @@ async def res_quick_view(call: CallbackQuery):
     await call.answer()
 
 
-async def main():
+async def process_update(update_data: dict):
+    update = Update.model_validate(update_data)
+    await dp.feed_update(bot, update)
+
+
+async def configure_webhook():
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
-    await dp.start_polling(bot)
+    if WEBHOOK_URL:
+        await bot.set_webhook(
+            url=WEBHOOK_URL,
+            secret_token=WEBHOOK_SECRET or None,
+            drop_pending_updates=False,
+        )
+        logger.info("Webhook is set: %s", WEBHOOK_URL)
+    else:
+        logger.info("WEBHOOK_BASE_URL is not set. Webhook registration skipped.")
+
+
+async def shutdown():
+    await bot.session.close()
+
+
+async def main():
+    await configure_webhook()
 
 
 if __name__ == "__main__":

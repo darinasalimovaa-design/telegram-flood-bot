@@ -20,13 +20,38 @@ Python bot for managing admission to two Telegram chats with file-based storage,
    ```bash
    pip install -r requirements.txt
    ```
-2. Copy `.env.example` to `.env` and set your bot token.
+2. Copy `.env.example` to `.env` and set:
+   - `BOT_TOKEN`
+   - `WEBHOOK_BASE_URL` (for PythonAnywhere domain, e.g. `https://yourname.pythonanywhere.com`)
+   - optional `WEBHOOK_SECRET` (recommended)
+   - optional `WEBHOOK_PATH` (default: `/webhook/<BOT_TOKEN>`)
 3. Update `config.json` with:
    - `main_admin_id`
    - `admin_group_id`
    - both chat IDs
    - info links
-4. Run the bot:
+4. Register webhook in Telegram:
    ```bash
-   python bot.py
+   python set_webhook.py
    ```
+
+## PythonAnywhere deployment (webhook)
+1. Create a Python web app on PythonAnywhere (manual or Flask config).
+2. Configure virtualenv and install dependencies from `requirements.txt`.
+3. Set environment variables in the web app (or in `.env` loaded from project directory).
+4. In WSGI file, point to project and Flask app:
+   ```python
+   import sys
+   path = "/home/<your_pythonanywhere_username>/telegram-flood-bot"
+   if path not in sys.path:
+       sys.path.append(path)
+
+   from app import app as application
+   ```
+5. Reload web app in PythonAnywhere dashboard.
+6. Run webhook registration once:
+   ```bash
+   python set_webhook.py
+   ```
+
+Webhook endpoint is served by `app.py` on `WEBHOOK_PATH`.
