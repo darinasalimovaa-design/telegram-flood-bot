@@ -63,8 +63,6 @@ atexit.register(_shutdown_loop)
 
 def ensure_started():
     global _started
-    if _started:
-        return
     with _startup_lock:
         if _started:
             return
@@ -83,7 +81,7 @@ def telegram_webhook():
         abort(500, description="BOT_TOKEN is not set")
 
     if WEBHOOK_SECRET:
-        header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        header_secret = request.headers.get("X-Telegram-Bot-API-Secret-Token", "")
         if header_secret != WEBHOOK_SECRET:
             abort(403)
 
