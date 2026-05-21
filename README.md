@@ -23,8 +23,8 @@ Python bot for managing admission to two Telegram chats with file-based storage,
 2. Copy `.env.example` to `.env` and set:
    - `BOT_TOKEN`
    - `WEBHOOK_BASE_URL` (for PythonAnywhere domain, e.g. `https://yourname.pythonanywhere.com`)
-   - optional `WEBHOOK_SECRET` (recommended)
-   - optional `WEBHOOK_PATH` (default: `/webhook`, recommended to change to a random path to make unsolicited webhook requests harder)
+   - `WEBHOOK_SECRET` (strongly recommended; primary webhook request validation mechanism)
+   - optional `WEBHOOK_PATH` (default: `/webhook`; changing to a random path is only an extra obscurity layer)
 3. Update `config.json` with:
    - `main_admin_id`
    - `admin_group_id`

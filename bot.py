@@ -624,7 +624,7 @@ async def configure_webhook():
     if WEBHOOK_URL:
         await bot.set_webhook(
             url=WEBHOOK_URL,
-            secret_token=WEBHOOK_SECRET or None,
+            secret_token=WEBHOOK_SECRET if WEBHOOK_SECRET else None,
             drop_pending_updates=False,
         )
         logger.info("Webhook is set: %s", WEBHOOK_URL)

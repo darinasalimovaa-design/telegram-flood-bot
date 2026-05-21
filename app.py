@@ -1,5 +1,6 @@
 import atexit
 import asyncio
+import logging
 import os
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from threading import Lock
@@ -10,6 +11,7 @@ from flask import Flask, Response, abort, request
 from bot import BOT_TOKEN, WEBHOOK_PATH, WEBHOOK_SECRET, configure_webhook, process_update, shutdown
 
 app = Flask(__name__)
+logger = logging.getLogger("flood_bot_web")
 
 _startup_lock = Lock()
 _started = False
@@ -50,8 +52,8 @@ def _shutdown_loop():
     if _event_loop.is_running():
         try:
             _run_async(shutdown())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Webhook shutdown cleanup failed: %s", exc)
         _event_loop.call_soon_threadsafe(_event_loop.stop)
     _loop_thread.join(timeout=SHUTDOWN_TIMEOUT_SECONDS)
 
@@ -97,6 +99,7 @@ def telegram_webhook():
         _run_async(process_update(payload))
     except FutureTimeoutError:
         abort(504, description="Webhook update processing timeout")
-    except Exception:
+    except Exception as exc:
+        logger.exception("Webhook update processing failed: %s", exc)
         abort(500, description="Webhook update processing failed")
     return Response("ok", status=200)
