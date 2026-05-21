@@ -78,11 +78,11 @@ def admin_app_controls(app_id: int):
     )
 
 
-def app_pick_kb(apps, prefix: str):
+def admin_list_kb(items, prefix: str, label: str):
     kb = InlineKeyboardBuilder()
-    for app in apps:
-        kb.button(text=f"#{app['id']}" if prefix == "app" else f"R#{app['id']}", callback_data=f"{prefix}:{app['id']}")
-    kb.adjust(4)
+    for item in items:
+        kb.button(text=f"{label} #{item['id']}", callback_data=f"{prefix}:{item['id']}")
+    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -131,6 +131,20 @@ async def find_application(app_id: int):
 async def find_reservation(res_id: int):
     data = load_data()
     return data, next((r for r in data["reservations"] if r["id"] == res_id), None)
+
+
+async def send_application_card(target_chat_id: int, app: dict, with_controls: bool = True):
+    text = (
+        f"📩 <b>Новая заявка #{app['id']}</b>\n"
+        f"<b>ID:</b> <code>{app['user_id']}</code>\n"
+        f"<b>Username:</b> @{escape(app['username']) if app['username'] else 'no_username'}\n"
+        f"<b>Чат:</b> {escape(app['chat_key'])}\n"
+        f"<b>Роль:</b> {escape(app['role'])}\n"
+        f"<b>ДР:</b> {escape(app['birth'])}\n"
+        f"<b>Код:</b> {escape(app['code'])}\n"
+        f"<b>Статус:</b> {escape(app['status'])}"
+    )
+    await bot.send_message(target_chat_id, text, reply_markup=admin_app_controls(app["id"]) if with_controls else None)
 
 
 async def add_application(message: Message, state: dict):
@@ -202,6 +216,14 @@ async def add_reservation(message: Message, state: dict):
         f"<b>Роль:</b> {escape(reservation['role'])}\n"
         f"<b>Бронь #</b>{rid}",
     )
+
+
+def applications_text(apps):
+    return "\n".join([f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps])
+
+
+def reservations_text(res):
+    return "\n".join([f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res])
 
 
 # ---------- public flow ----------
@@ -434,13 +456,21 @@ async def admin_list_apps(message: Message):
         return
     data = load_data()
     apps = data["applications"]
+    pending = [a for a in apps if a["status"] == "pending"]
     if not apps:
         await message.answer("Заявок нет.", reply_markup=reply_menu(True))
         return
-    text = "\n".join(
-        [f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps[-20:]]
+
+    await message.answer(
+        f"📥 <b>Всего заявок:</b> {len(apps)}\n<b>Ожидают:</b> {len(pending)}",
+        reply_markup=reply_menu(True),
     )
-    await message.answer(f"📥 <b>Последние заявки</b>\n\n{text}", reply_markup=reply_menu(True))
+
+    if pending:
+        await message.answer(
+            "<b>Ожидающие заявки:</b>\n\n" + applications_text(pending[-20:]),
+            reply_markup=admin_list_kb(pending[-10:], "app", "Заявка"),
+        )
 
 
 @dp.message(F.text == "Брони")
@@ -452,10 +482,14 @@ async def admin_list_res(message: Message):
     if not res:
         await message.answer("Броней нет.", reply_markup=reply_menu(True))
         return
-    text = "\n".join(
-        [f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res[-20:]]
+    await message.answer(
+        f"📌 <b>Всего броней:</b> {len(res)}",
+        reply_markup=reply_menu(True),
     )
-    await message.answer(f"📌 <b>Последние брони</b>\n\n{text}", reply_markup=reply_menu(True))
+    await message.answer(
+        "<b>Список броней:</b>\n\n" + reservations_text(res[-20:]),
+        reply_markup=admin_list_kb(res[-10:], "res", "Бронь"),
+    )
 
 
 @dp.message(F.text == "Статус чатов")
@@ -492,8 +526,12 @@ async def cmd_applications(message: Message):
     if not apps:
         await message.answer("Заявок нет.")
         return
-    text = "\n".join([f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps[-30:]])
-    await message.answer(text)
+    pending = [a for a in apps if a["status"] == "pending"]
+    await message.answer(
+        f"📥 Всего заявок: {len(apps)}\nОжидают: {len(pending)}",
+    )
+    if pending:
+        await message.answer("Ожидающие заявки:\n\n" + applications_text(pending[-30:]), reply_markup=admin_list_kb(pending[-12:], "app", "Заявка"))
 
 
 @dp.message(Command("reservations"))
@@ -505,8 +543,8 @@ async def cmd_reservations(message: Message):
     if not res:
         await message.answer("Броней нет.")
         return
-    text = "\n".join([f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res[-30:]])
-    await message.answer(text)
+    await message.answer(f"📌 Всего броней: {len(res)}")
+    await message.answer("Список броней:\n\n" + reservations_text(res[-30:]), reply_markup=admin_list_kb(res[-12:], "res", "Бронь"))
 
 
 @dp.message(Command("status"))
@@ -525,8 +563,49 @@ async def cmd_pending(message: Message):
     if not pending:
         await message.answer("Ожидающих заявок нет.")
         return
-    text = "\n".join([f"#{a['id']} — {a['chat_key']} — {a['role']}" for a in pending[-30:]])
-    await message.answer(text)
+    await message.answer("Ожидающие заявки:\n\n" + applications_text(pending[-30:]), reply_markup=admin_list_kb(pending[-12:], "app", "Заявка"))
+
+
+@dp.callback_query(F.data.startswith("app:"))
+async def app_quick_view(call: CallbackQuery):
+    app_id = int(call.data.split(":", 1)[1])
+    data = load_data()
+    app = next((a for a in data["applications"] if a["id"] == app_id), None)
+    if not app:
+        await call.answer("Заявка не найдена", show_alert=True)
+        return
+    await call.message.answer(
+        f"<b>Заявка #{app['id']}</b>\n"
+        f"<b>ID:</b> <code>{app['user_id']}</code>\n"
+        f"<b>Username:</b> @{escape(app['username']) if app['username'] else 'no_username'}\n"
+        f"<b>Чат:</b> {escape(app['chat_key'])}\n"
+        f"<b>Роль:</b> {escape(app['role'])}\n"
+        f"<b>ДР:</b> {escape(app['birth'])}\n"
+        f"<b>Код:</b> {escape(app['code'])}\n"
+        f"<b>Статус:</b> {escape(app['status'])}\n"
+        f"<b>Причина отказа:</b> {escape(app['admin_feedback'] or '-')}",
+        reply_markup=admin_app_controls(app_id),
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("res:"))
+async def res_quick_view(call: CallbackQuery):
+    res_id = int(call.data.split(":", 1)[1])
+    data = load_data()
+    res = next((r for r in data["reservations"] if r["id"] == res_id), None)
+    if not res:
+        await call.answer("Бронь не найдена", show_alert=True)
+        return
+    await call.message.answer(
+        f"<b>Бронь #{res['id']}</b>\n"
+        f"<b>ID:</b> <code>{res['user_id']}</code>\n"
+        f"<b>Username:</b> @{escape(res['username']) if res['username'] else 'no_username'}\n"
+        f"<b>Чат:</b> {escape(res['chat_key'])}\n"
+        f"<b>Роль:</b> {escape(res['role'])}\n"
+        f"<b>Статус:</b> {escape(res['status'])}",
+    )
+    await call.answer()
 
 
 async def main():
