@@ -14,8 +14,18 @@ app = Flask(__name__)
 _startup_lock = Lock()
 _started = False
 _event_loop = asyncio.new_event_loop()
-ASYNC_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_PROCESS_TIMEOUT", "10"))
-SHUTDOWN_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_LOOP_SHUTDOWN_TIMEOUT", "1"))
+
+
+def _read_float_env(name: str, default: str) -> float:
+    value = os.getenv(name, default)
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid float value for {name}: {value}") from exc
+
+
+ASYNC_TIMEOUT_SECONDS = _read_float_env("WEBHOOK_PROCESS_TIMEOUT", "10")
+SHUTDOWN_TIMEOUT_SECONDS = _read_float_env("WEBHOOK_LOOP_SHUTDOWN_TIMEOUT", "1")
 
 
 def _loop_runner():
@@ -87,4 +97,6 @@ def telegram_webhook():
         _run_async(process_update(payload))
     except FutureTimeoutError:
         abort(504, description="Webhook update processing timeout")
+    except Exception:
+        abort(500, description="Webhook update processing failed")
     return Response("ok", status=200)
