@@ -1,5 +1,4 @@
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -8,6 +7,7 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 APP_FILE = DATA_DIR / "applications.json"
 CONFIG_FILE = BASE_DIR / "config.json"
+LOG_FILE = BASE_DIR / "bot.log"
 
 
 def read_json(path: Path, default: Any) -> Any:

@@ -13,6 +13,7 @@ Python bot for managing admission to two Telegram chats with file-based storage,
 - Full application and reservation lists in private admin chat and admin group
 - JSON file storage instead of a database
 - Logging to file
+- Admin commands in group: `/applications`, `/reservations`, `/pending`, `/status`
 
 ## Setup
 1. Install dependencies:

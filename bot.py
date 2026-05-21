@@ -2,9 +2,10 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from html import escape
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.enums import ChatMemberStatus, ParseMode
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
@@ -23,27 +24,29 @@ dp = Dispatcher()
 USER_STATE = {}
 
 
+# ---------- helpers ----------
+def cfg():
+    return load_config()
+
+
 def is_admin(user_id: int) -> bool:
-    cfg = load_config()
-    return user_id == cfg.get("main_admin_id")
+    return user_id == cfg().get("main_admin_id")
 
 
-def main_menu():
+def reply_menu(is_admin_user: bool = False):
     kb = ReplyKeyboardBuilder()
+    if is_admin_user:
+        kb.button(text="Заявки")
+        kb.button(text="Брони")
+        kb.button(text="Статус чатов")
+        kb.button(text="Логи")
+        kb.adjust(2, 2)
+        return kb.as_markup(resize_keyboard=True)
+
     kb.button(text="Подать заявку")
     kb.button(text="Мои заявки")
     kb.button(text="Отменить")
     kb.button(text="Инфо")
-    kb.adjust(2, 2)
-    return kb.as_markup(resize_keyboard=True)
-
-
-def admin_menu():
-    kb = ReplyKeyboardBuilder()
-    kb.button(text="Заявки")
-    kb.button(text="Брони")
-    kb.button(text="Статус чатов")
-    kb.button(text="Логи")
     kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
 
@@ -55,28 +58,43 @@ def cancel_inline():
 
 
 def chat_choice_kb():
-    cfg = load_config()
+    c = cfg()
     kb = InlineKeyboardBuilder()
-    kb.button(text=cfg["chats"]["chat1"]["title"], callback_data="choose_chat:chat1")
-    kb.button(text=cfg["chats"]["chat2"]["title"], callback_data="choose_chat:chat2")
+    kb.button(text=c["chats"]["chat1"]["title"], callback_data="choose_chat:chat1")
+    kb.button(text=c["chats"]["chat2"]["title"], callback_data="choose_chat:chat2")
     kb.adjust(1)
     return kb.as_markup()
 
 
-def apps_kb(app_ids, prefix):
+def admin_app_controls(app_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"approve_app:{app_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_app:{app_id}"),
+            ],
+            [InlineKeyboardButton(text="✏️ Отклонить с причиной", callback_data=f"reject_reason:{app_id}")],
+        ]
+    )
+
+
+def app_pick_kb(apps, prefix: str):
     kb = InlineKeyboardBuilder()
-    for app_id in app_ids:
-        kb.button(text=f"#{app_id}", callback_data=f"{prefix}:{app_id}")
-    kb.adjust(2)
+    for app in apps:
+        kb.button(text=f"#{app['id']}" if prefix == "app" else f"R#{app['id']}", callback_data=f"{prefix}:{app['id']}")
+    kb.adjust(4)
     return kb.as_markup()
 
 
 async def send_admins(text: str, markup=None):
-    cfg = load_config()
-    if cfg.get("main_admin_id"):
-        await bot.send_message(cfg["main_admin_id"], text, reply_markup=markup)
-    if cfg.get("admin_group_id"):
-        await bot.send_message(cfg["admin_group_id"], text, reply_markup=markup)
+    c = cfg()
+    targets = [c.get("main_admin_id"), c.get("admin_group_id")]
+    for chat_id in targets:
+        if chat_id:
+            try:
+                await bot.send_message(chat_id, text, reply_markup=markup)
+            except Exception as exc:
+                logger.warning("Failed to send admin message to %s: %s", chat_id, exc)
 
 
 async def get_chat_count(chat_id: int) -> int:
@@ -84,8 +102,7 @@ async def get_chat_count(chat_id: int) -> int:
 
 
 async def is_full(chat_key: str) -> bool:
-    cfg = load_config()
-    chat = cfg["chats"][chat_key]
+    chat = cfg()["chats"][chat_key]
     if not chat["chat_id"]:
         return False
     try:
@@ -97,97 +114,23 @@ async def is_full(chat_key: str) -> bool:
 
 async def create_one_time_link(chat_id: int, title: str, user_id: int) -> str:
     expire_date = datetime.now(timezone.utc) + timedelta(hours=24)
-    link = await bot.create_chat_invite_link(
+    invite = await bot.create_chat_invite_link(
         chat_id=chat_id,
         member_limit=1,
         expire_date=expire_date,
         name=f"{title}-{user_id}-{int(datetime.now().timestamp())}",
     )
-    return link.invite_link
+    return invite.invite_link
 
 
-@dp.message(CommandStart())
-async def start(message: Message):
-    USER_STATE.pop(message.from_user.id, None)
-    if is_admin(message.from_user.id):
-        await message.answer("Админ-панель открыта.", reply_markup=admin_menu())
-    else:
-        await message.answer("Привет. Выбери действие в меню ниже.", reply_markup=main_menu())
-
-
-@dp.message(Command("menu"))
-async def menu(message: Message):
-    if is_admin(message.from_user.id):
-        await message.answer("Админ-меню.", reply_markup=admin_menu())
-    else:
-        await message.answer("Меню открыто.", reply_markup=main_menu())
-
-
-@dp.message(F.text == "Инфо")
-async def info(message: Message):
-    cfg = load_config()
-    text = (
-        f"<b>{cfg['chats']['chat1']['title']}</b>: {cfg['chats']['chat1']['info_url']}\n"
-        f"<b>{cfg['chats']['chat2']['title']}</b>: {cfg['chats']['chat2']['info_url']}"
-    )
-    await message.answer(text, reply_markup=main_menu())
-
-
-@dp.message(F.text == "Подать заявку")
-async def apply(message: Message):
-    await message.answer("Выбери чат:", reply_markup=chat_choice_kb())
-
-
-@dp.callback_query(F.data.startswith("choose_chat:"))
-async def choose_chat(call: CallbackQuery):
-    chat_key = call.data.split(":", 1)[1]
-    cfg = load_config()
-    chat = cfg["chats"][chat_key]
-    if await is_full(chat_key):
-        state = USER_STATE.setdefault(call.from_user.id, {})
-        state["chat_key"] = chat_key
-        state["step"] = "reserve_role"
-        await call.message.answer(
-            f"{chat['title']} заполнен. Можешь забронировать роль. Введи желаемую роль:",
-            reply_markup=cancel_inline(),
-        )
-        await call.answer()
-        return
-    USER_STATE[call.from_user.id] = {"chat_key": chat_key, "step": "role"}
-    await call.message.answer(
-        f"<b>Инфо:</b> {chat['info_url']}\n\nТеперь введи желаемую роль:",
-        reply_markup=cancel_inline(),
-    )
-    await call.answer()
-
-
-@dp.callback_query(F.data == "cancel_action")
-async def cancel_action(call: CallbackQuery):
-    USER_STATE.pop(call.from_user.id, None)
-    await call.message.answer("Действие отменено.", reply_markup=main_menu())
-    await call.answer()
-
-
-@dp.message(F.text == "Отменить")
-async def cancel_user(message: Message):
-    USER_STATE.pop(message.from_user.id, None)
-    await message.answer("Текущее действие отменено.", reply_markup=main_menu())
-
-
-@dp.message(F.text == "Мои заявки")
-async def my_apps(message: Message):
+async def find_application(app_id: int):
     data = load_data()
-    apps = [a for a in data["applications"] if a["user_id"] == message.from_user.id]
-    res = [r for r in data["reservations"] if r["user_id"] == message.from_user.id]
-    if not apps and not res:
-        await message.answer("У тебя пока нет заявок или броней.", reply_markup=main_menu())
-        return
-    lines = []
-    for a in apps:
-        lines.append(f"Заявка #{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}")
-    for r in res:
-        lines.append(f"Бронь #{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}")
-    await message.answer("\n".join(lines), reply_markup=main_menu())
+    return data, next((a for a in data["applications"] if a["id"] == app_id), None)
+
+
+async def find_reservation(res_id: int):
+    data = load_data()
+    return data, next((r for r in data["reservations"] if r["id"] == res_id), None)
 
 
 async def add_application(message: Message, state: dict):
@@ -210,24 +153,23 @@ async def add_application(message: Message, state: dict):
     data["applications"].append(app)
     save_data(data)
     USER_STATE.pop(message.from_user.id, None)
-    await message.answer("Заявка отправлена. Ожидай решение администратора.", reply_markup=main_menu())
+
+    await message.answer(
+        "✅ <b>Заявка отправлена</b>\n"
+        "Теперь ожидай решение администратора.",
+        reply_markup=reply_menu(False),
+    )
+
     await send_admins(
-        f"<b>Новая заявка #{app_id}</b>\n"
-        f"ID: {app['user_id']}\n"
-        f"@{app['username'] or 'no_username'}\n"
-        f"Чат: {state['chat_key']}\n"
-        f"Роль: {app['role']}\n"
-        f"ДР: {app['birth']}\n"
-        f"Код: {app['code']}",
-        markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Принять", callback_data=f"approve_app:{app_id}"),
-                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_app:{app_id}"),
-                ],
-                [InlineKeyboardButton(text="✏️ Отклонить с причиной", callback_data=f"reject_reason:{app_id}")],
-            ]
-        ),
+        "📩 <b>Новая заявка</b>\n"
+        f"<b>ID:</b> <code>{app['user_id']}</code>\n"
+        f"<b>Username:</b> @{escape(app['username']) if app['username'] else 'no_username'}\n"
+        f"<b>Чат:</b> {escape(state['chat_key'])}\n"
+        f"<b>Роль:</b> {escape(app['role'])}\n"
+        f"<b>ДР:</b> {escape(app['birth'])}\n"
+        f"<b>Код:</b> {escape(app['code'])}\n"
+        f"<b>Заявка #</b>{app_id}",
+        markup=admin_app_controls(app_id),
     )
 
 
@@ -246,14 +188,111 @@ async def add_reservation(message: Message, state: dict):
     data["reservations"].append(reservation)
     save_data(data)
     USER_STATE.pop(message.from_user.id, None)
-    await message.answer("Роль забронирована. Мы сообщим, когда появится место.", reply_markup=main_menu())
-    await send_admins(
-        f"<b>Новая бронь #{rid}</b>\n"
-        f"ID: {reservation['user_id']}\n"
-        f"@{reservation['username'] or 'no_username'}\n"
-        f"Чат: {state['chat_key']}\n"
-        f"Роль: {reservation['role']}"
+
+    await message.answer(
+        "📌 <b>Роль забронирована</b>\n"
+        "Мы сообщим, когда в чате появится место.",
+        reply_markup=reply_menu(False),
     )
+    await send_admins(
+        "📌 <b>Новая бронь</b>\n"
+        f"<b>ID:</b> <code>{reservation['user_id']}</code>\n"
+        f"<b>Username:</b> @{escape(reservation['username']) if reservation['username'] else 'no_username'}\n"
+        f"<b>Чат:</b> {escape(state['chat_key'])}\n"
+        f"<b>Роль:</b> {escape(reservation['role'])}\n"
+        f"<b>Бронь #</b>{rid}",
+    )
+
+
+# ---------- public flow ----------
+@dp.message(CommandStart())
+async def start(message: Message):
+    USER_STATE.pop(message.from_user.id, None)
+    await message.answer(
+        "👋 <b>Привет!</b>\n"
+        "Это бот для подачи заявки на вход в один из двух чатов.\n"
+        "Выбери действие в меню ниже.",
+        reply_markup=reply_menu(is_admin(message.from_user.id)),
+    )
+
+
+@dp.message(Command("menu"))
+async def menu(message: Message):
+    await message.answer("📋 <b>Меню открыто</b>", reply_markup=reply_menu(is_admin(message.from_user.id)))
+
+
+@dp.message(F.text == "Инфо")
+async def info(message: Message):
+    c = cfg()
+    text = (
+        f"<b>{escape(c['chats']['chat1']['title'])}</b>\n"
+        f"Инфо: {escape(c['chats']['chat1']['info_url'])}\n\n"
+        f"<b>{escape(c['chats']['chat2']['title'])}</b>\n"
+        f"Инфо: {escape(c['chats']['chat2']['info_url'])}"
+    )
+    await message.answer(text, reply_markup=reply_menu(False))
+
+
+@dp.message(F.text == "Подать заявку")
+async def apply(message: Message):
+    await message.answer("Выбери чат, в который хочешь попасть:", reply_markup=chat_choice_kb())
+
+
+@dp.callback_query(F.data.startswith("choose_chat:"))
+async def choose_chat(call: CallbackQuery):
+    chat_key = call.data.split(":", 1)[1]
+    c = cfg()
+    chat = c["chats"][chat_key]
+
+    if await is_full(chat_key):
+        USER_STATE[call.from_user.id] = {"chat_key": chat_key, "step": "reserve_role"}
+        await call.message.answer(
+            f"⚠️ <b>{escape(chat['title'])}</b> сейчас заполнен.\n"
+            f"Если хочешь, можешь забронировать роль.\n\n"
+            f"Сначала изучи инфо: {escape(chat['info_url'])}\n\n"
+            f"Введи желаемую роль:",
+            reply_markup=cancel_inline(),
+        )
+        await call.answer()
+        return
+
+    USER_STATE[call.from_user.id] = {"chat_key": chat_key, "step": "role"}
+    await call.message.answer(
+        f"📌 <b>Сначала ознакомься с инфо:</b>\n{escape(chat['info_url'])}\n\n"
+        f"Теперь введи желаемую роль:",
+        reply_markup=cancel_inline(),
+    )
+    await call.answer()
+
+
+@dp.callback_query(F.data == "cancel_action")
+async def cancel_action(call: CallbackQuery):
+    USER_STATE.pop(call.from_user.id, None)
+    await call.message.answer("❎ <b>Действие отменено</b>", reply_markup=reply_menu(is_admin(call.from_user.id)))
+    await call.answer()
+
+
+@dp.message(F.text == "Отменить")
+async def cancel_user(message: Message):
+    USER_STATE.pop(message.from_user.id, None)
+    await message.answer("❎ <b>Текущее действие отменено</b>", reply_markup=reply_menu(is_admin(message.from_user.id)))
+
+
+@dp.message(F.text == "Мои заявки")
+async def my_apps(message: Message):
+    data = load_data()
+    apps = [a for a in data["applications"] if a["user_id"] == message.from_user.id]
+    res = [r for r in data["reservations"] if r["user_id"] == message.from_user.id]
+    if not apps and not res:
+        await message.answer("У тебя пока нет заявок или броней.", reply_markup=reply_menu(False))
+        return
+
+    parts = []
+    for a in apps:
+        parts.append(f"Заявка <b>#{a['id']}</b> — <b>{escape(a['status'])}</b> — {escape(a['chat_key'])} — {escape(a['role'])}")
+    for r in res:
+        parts.append(f"Бронь <b>#{r['id']}</b> — <b>{escape(r['status'])}</b> — {escape(r['chat_key'])} — {escape(r['role'])}")
+    await message.answer("\n".join(parts), reply_markup=reply_menu(False))
 
 
 @dp.message(F.text)
@@ -261,23 +300,46 @@ async def text_router(message: Message):
     state = USER_STATE.get(message.from_user.id)
     if not state:
         return
+
     step = state.get("step")
     if step in ("role", "reserve_role"):
-        state["role"] = message.text
-        state["step"] = "birth" if step == "role" else "reserve_done"
+        state["role"] = message.text.strip()
         if step == "reserve_role":
             await add_reservation(message, state)
         else:
-            await message.answer("Введи дату рождения (YYYY-MM-DD):", reply_markup=cancel_inline())
-    elif step == "birth":
-        state["birth"] = message.text
+            state["step"] = "birth"
+            await message.answer("Введи дату рождения в формате <code>YYYY-MM-DD</code>:", reply_markup=cancel_inline())
+        return
+
+    if step == "birth":
+        state["birth"] = message.text.strip()
         state["step"] = "code"
         await message.answer("Введи кодовое слово:", reply_markup=cancel_inline())
-    elif step == "code":
-        state["code"] = message.text
+        return
+
+    if step == "code":
+        state["code"] = message.text.strip()
         await add_application(message, state)
+        return
+
+    if step == "reason" and is_admin(message.from_user.id):
+        app_id = state.get("app_id")
+        data = load_data()
+        app = next((a for a in data["applications"] if a["id"] == app_id), None)
+        if not app:
+            USER_STATE.pop(message.from_user.id, None)
+            await message.answer("Заявка не найдена.")
+            return
+        app["status"] = "rejected"
+        app["admin_feedback"] = message.text.strip()
+        save_data(data)
+        await bot.send_message(app["user_id"], f"❌ <b>Ваша заявка #{app_id} отклонена</b>\n\nПричина: {escape(message.text.strip())}")
+        USER_STATE.pop(message.from_user.id, None)
+        await message.answer(f"Причина отправлена по заявке #{app_id}.")
+        return
 
 
+# ---------- admin actions ----------
 @dp.callback_query(F.data.startswith("approve_app:"))
 async def approve_app(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
@@ -286,23 +348,32 @@ async def approve_app(call: CallbackQuery):
     if not app:
         await call.answer("Заявка не найдена", show_alert=True)
         return
-    cfg = load_config()
-    chat = cfg["chats"][app["chat_key"]]
+
+    chat = cfg()["chats"][app["chat_key"]]
     if not chat["chat_id"]:
-        await call.answer("Не настроен chat_id", show_alert=True)
+        await call.answer("Не настроен chat_id в config.json", show_alert=True)
         return
-    link = await create_one_time_link(chat["chat_id"], chat["title"], app["user_id"])
+
+    try:
+        link = await create_one_time_link(chat["chat_id"], chat["title"], app["user_id"])
+    except Exception as exc:
+        logger.exception("Failed to create invite link: %s", exc)
+        await call.answer("Не удалось создать ссылку", show_alert=True)
+        return
+
     app["status"] = "approved"
     app["approved_link"] = link
     save_data(data)
+
     await bot.send_message(
         app["user_id"],
-        f"Ваша заявка #{app_id} одобрена.\n\nНажми, чтобы подтвердить вход:",
+        "✅ <b>Ваша заявка одобрена</b>\n\n"
+        "Нажми кнопку ниже, чтобы подтвердить вход.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Подтвердить вход", callback_data=f"confirm_join:{app_id}")]]
         ),
     )
-    await call.message.answer(f"Заявка #{app_id} одобрена. Ссылка создана.")
+    await call.message.answer(f"✅ Заявка #{app_id} одобрена. Одноразовая ссылка создана.")
     await call.answer()
 
 
@@ -314,10 +385,11 @@ async def reject_app(call: CallbackQuery):
     if not app:
         await call.answer("Заявка не найдена", show_alert=True)
         return
+
     app["status"] = "rejected"
     save_data(data)
-    await bot.send_message(app["user_id"], f"Ваша заявка #{app_id} отклонена без объяснения.")
-    await call.message.answer(f"Заявка #{app_id} отклонена.")
+    await bot.send_message(app["user_id"], f"❌ <b>Ваша заявка #{app_id} отклонена</b>\n\nБез объяснения.")
+    await call.message.answer(f"❌ Заявка #{app_id} отклонена без объяснения.")
     await call.answer()
 
 
@@ -325,28 +397,8 @@ async def reject_app(call: CallbackQuery):
 async def reject_reason(call: CallbackQuery):
     app_id = int(call.data.split(":", 1)[1])
     USER_STATE[call.from_user.id] = {"step": "reason", "app_id": app_id}
-    await call.message.answer("Отправь причину отклонения следующим сообщением.")
+    await call.message.answer("Напиши причину отклонения следующим сообщением.")
     await call.answer()
-
-
-@dp.message(F.text, F.from_user.id)
-async def admin_reason_capture(message: Message):
-    state = USER_STATE.get(message.from_user.id)
-    if not state or state.get("step") != "reason" or not is_admin(message.from_user.id):
-        return
-    app_id = state["app_id"]
-    data = load_data()
-    app = next((a for a in data["applications"] if a["id"] == app_id), None)
-    if not app:
-        USER_STATE.pop(message.from_user.id, None)
-        await message.answer("Заявка не найдена.")
-        return
-    app["status"] = "rejected"
-    app["admin_feedback"] = message.text
-    save_data(data)
-    await bot.send_message(app["user_id"], f"Ваша заявка #{app_id} отклонена. Причина: {message.text}")
-    USER_STATE.pop(message.from_user.id, None)
-    await message.answer(f"Причина отправлена по заявке #{app_id}.")
 
 
 @dp.callback_query(F.data.startswith("confirm_join:"))
@@ -357,17 +409,25 @@ async def confirm_join(call: CallbackQuery):
     if not app or app["user_id"] != call.from_user.id:
         await call.answer("Заявка не найдена", show_alert=True)
         return
+
     if not app.get("approved_link"):
         await call.answer("Ссылка не готова", show_alert=True)
         return
+
     app["join_confirmed"] = True
     save_data(data)
-    await bot.send_message(call.from_user.id, f"Вот твоя одноразовая ссылка:\n{app['approved_link']}")
-    await send_admins(f"Пользователь {call.from_user.id} подтвердил вход по заявке #{app_id} и получил доступ.")
-    await call.message.answer("Вход подтверждён. Админ уведомлён.")
+
+    await bot.send_message(
+        call.from_user.id,
+        f"🔗 <b>Вот твоя одноразовая ссылка</b>\n{app['approved_link']}\n\n"
+        f"После входа админ получит уведомление.",
+    )
+    await send_admins(f"✅ Пользователь <code>{call.from_user.id}</code> подтвердил вход по заявке #{app_id} и получил доступ.")
+    await call.message.answer("✅ Вход подтверждён. Админ уведомлён.")
     await call.answer()
 
 
+# ---------- admin panel ----------
 @dp.message(F.text == "Заявки")
 async def admin_list_apps(message: Message):
     if not is_admin(message.from_user.id):
@@ -375,10 +435,12 @@ async def admin_list_apps(message: Message):
     data = load_data()
     apps = data["applications"]
     if not apps:
-        await message.answer("Заявок нет.", reply_markup=admin_menu())
+        await message.answer("Заявок нет.", reply_markup=reply_menu(True))
         return
-    text = "\n".join([f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps[-20:]])
-    await message.answer(text, reply_markup=admin_menu())
+    text = "\n".join(
+        [f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps[-20:]]
+    )
+    await message.answer(f"📥 <b>Последние заявки</b>\n\n{text}", reply_markup=reply_menu(True))
 
 
 @dp.message(F.text == "Брони")
@@ -388,34 +450,83 @@ async def admin_list_res(message: Message):
     data = load_data()
     res = data["reservations"]
     if not res:
-        await message.answer("Броней нет.", reply_markup=admin_menu())
+        await message.answer("Броней нет.", reply_markup=reply_menu(True))
         return
-    text = "\n".join([f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res[-20:]])
-    await message.answer(text, reply_markup=admin_menu())
+    text = "\n".join(
+        [f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res[-20:]]
+    )
+    await message.answer(f"📌 <b>Последние брони</b>\n\n{text}", reply_markup=reply_menu(True))
 
 
 @dp.message(F.text == "Статус чатов")
 async def admin_chat_status(message: Message):
     if not is_admin(message.from_user.id):
         return
-    cfg = load_config()
+    c = cfg()
     lines = []
-    for key, chat in cfg["chats"].items():
+    for key, chat in c["chats"].items():
         count = 0
         if chat["chat_id"]:
             try:
                 count = await get_chat_count(chat["chat_id"])
             except Exception:
                 count = 0
-        lines.append(f"{chat['title']}: {count}/{chat['member_limit']}")
-    await message.answer("\n".join(lines), reply_markup=admin_menu())
+        lines.append(f"<b>{escape(chat['title'])}</b>: {count}/{chat['member_limit']}")
+    await message.answer("\n".join(lines), reply_markup=reply_menu(True))
 
 
 @dp.message(F.text == "Логи")
 async def admin_logs(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("Логи ведутся в файле bot.log на сервере.", reply_markup=admin_menu())
+    await message.answer("📝 Логи пишутся в <code>bot.log</code> на сервере.", reply_markup=reply_menu(True))
+
+
+# ---------- admin commands in group and private ----------
+@dp.message(Command("applications"))
+async def cmd_applications(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    data = load_data()
+    apps = data["applications"]
+    if not apps:
+        await message.answer("Заявок нет.")
+        return
+    text = "\n".join([f"#{a['id']} — {a['status']} — {a['chat_key']} — {a['role']}" for a in apps[-30:]])
+    await message.answer(text)
+
+
+@dp.message(Command("reservations"))
+async def cmd_reservations(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    data = load_data()
+    res = data["reservations"]
+    if not res:
+        await message.answer("Броней нет.")
+        return
+    text = "\n".join([f"#{r['id']} — {r['status']} — {r['chat_key']} — {r['role']}" for r in res[-30:]])
+    await message.answer(text)
+
+
+@dp.message(Command("status"))
+async def cmd_status(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await admin_chat_status(message)
+
+
+@dp.message(Command("pending"))
+async def cmd_pending(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    data = load_data()
+    pending = [a for a in data["applications"] if a["status"] == "pending"]
+    if not pending:
+        await message.answer("Ожидающих заявок нет.")
+        return
+    text = "\n".join([f"#{a['id']} — {a['chat_key']} — {a['role']}" for a in pending[-30:]])
+    await message.answer(text)
 
 
 async def main():
