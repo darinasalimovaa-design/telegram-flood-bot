@@ -1,0 +1,18 @@
+{
+  "main_admin_id": 0,
+  "admin_group_id": 0,
+  "chats": {
+    "chat1": {
+      "title": "Chat 1",
+      "info_url": "https://example.com/chat1-info",
+      "chat_id": 0,
+      "member_limit": 60
+    },
+    "chat2": {
+      "title": "Chat 2",
+      "info_url": "https://example.com/chat2-info",
+      "chat_id": 0,
+      "member_limit": 60
+    }
+  }
+}
