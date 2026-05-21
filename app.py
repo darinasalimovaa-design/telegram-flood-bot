@@ -7,14 +7,14 @@ from threading import Thread
 
 from flask import Flask, Response, abort, request
 
-from bot import BOT_TOKEN, WEBHOOK_PATH, WEBHOOK_SECRET, configure_webhook, process_update
+from bot import BOT_TOKEN, WEBHOOK_PATH, WEBHOOK_SECRET, configure_webhook, process_update, shutdown
 
 app = Flask(__name__)
 
 _startup_lock = Lock()
 _started = False
 _event_loop = asyncio.new_event_loop()
-ASYNC_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_PROCESS_TIMEOUT", "20"))
+ASYNC_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_PROCESS_TIMEOUT", "10"))
 SHUTDOWN_TIMEOUT_SECONDS = float(os.getenv("WEBHOOK_LOOP_SHUTDOWN_TIMEOUT", "1"))
 
 
@@ -38,6 +38,10 @@ def _run_async(coro):
 
 def _shutdown_loop():
     if _event_loop.is_running():
+        try:
+            _run_async(shutdown())
+        except Exception:
+            pass
         _event_loop.call_soon_threadsafe(_event_loop.stop)
     _loop_thread.join(timeout=SHUTDOWN_TIMEOUT_SECONDS)
 
